@@ -2,6 +2,7 @@
 
 (define-module (guile-iterators iterator))
 (use-modules (ice-9 textual-ports))
+(use-modules (srfi srfi-1))
 
 (define-public value car)
 (define-public next cdr)
@@ -179,6 +180,52 @@
 (define-public (iter-concat iter-iter)
 	       (cons (cons (repeat '()) iter-iter)
 		     (lambda (a) (iter-concat-impl (car a) (cdr a)))))
+
+(define (iter-overlay-impl func def running waiting iter-iter-n)
+  (cond ((and (null? waiting)
+	      (not (null? iter-iter-n)))
+	 (let ((f (generate iter-iter-n)))
+	   (if (null? (value f))
+	     (iter-overlay-impl func def running '() '())
+	     (iter-overlay-impl func def running (value f) (next f)))))
+
+	((and (not (null? waiting))
+	      (= (car waiting) 0)) (iter-overlay-impl func def (cons (cdr waiting) running) '() iter-iter-n))
+	((and (null? running)
+	      (not (null? waiting)))
+	 (cons def
+	       (list func def running (cons (- (car waiting) 1) (cdr waiting)) iter-iter-n)))
+
+	((and (null? running)
+	      (null? waiting)
+	      (null? iter-iter-n))
+	 (cons '()
+	       (list func def '() '() '())))
+
+	((not (null? running))
+	 (let* ((pairs (filter-map (lambda (x)
+				     (let ((r (generate x)))
+				       (if (null? (value r))
+					 #f
+					 r))) running))
+		(res (if (null? pairs)
+		       '()
+		       (fold + 0 (map value pairs))))
+		(newiter (map next pairs))
+		(wait (if (null? waiting)
+			'()
+			(cons (- (car waiting) 1)
+			      (cdr waiting)))))
+	   (cons res
+		 (list func def newiter wait iter-iter-n))))))
+
+(define-public (iter-overlay func def iter-iter-n)
+	       (cons (list func def '() '() iter-iter-n)
+		     (lambda (a) (iter-overlay-impl (car a)
+						    (cadr a)
+						    (caddr a)
+						    (cadddr a)
+						    (cadddr (cdr a))))))
 
 (define-public (iter-for-each fun iter)
 	       (let* ((source (generate iter))
